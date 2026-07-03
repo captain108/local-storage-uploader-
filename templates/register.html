@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Register - Captain Uploader{% endblock %}
 {% block content %}
-<form method="POST" action="{{ url_for('auth.register') }}">
+<form method="POST" action="{{ url_for('register') }}">
     <div class="form-group">
         <label>Username</label>
         <input type="text" name="username" required placeholder="Choose a cool name">
@@ -17,6 +17,6 @@
     <button type="submit" class="btn" style="width:100%;">Create Account</button>
 </form>
 <div class="text-center mt-20">
-    <a href="{{ url_for('auth.login') }}" style="color:#f0c040;">Already have an account? Log in</a>
+    <a href="{{ url_for('login') }}" style="color:#f0c040;">Already have an account? Log in</a>
 </div>
 {% endblock %}
