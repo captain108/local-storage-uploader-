@@ -28,11 +28,11 @@
     <div style="width:100%; height:18px; background:#2a2d44; border-radius:20px; overflow:hidden; box-shadow:inset 0 2px 4px rgba(0,0,0,0.3);">
         <div id="progress-fill" style="height:100%; width:0%; background:#f0c040; border-radius:20px; transition:width 0.1s linear;"></div>
     </div>
-    <div style="display:flex; justify-content:space-between; color:#bbb; font-size:13px; margin-top:8px; flex-wrap:wrap; gap:5px;">
-        <span><i class="fas fa-percent"></i> <span id="percent">0</span>%</span>
-        <span><i class="fas fa-tachometer-alt"></i> <span id="speed">0</span> KB/s</span>
-        <span><i class="fas fa-database"></i> <span id="loaded">0</span> MB / <span id="total">0</span> MB</span>
-        <span><i class="fas fa-clock"></i> <span id="time">0</span>s</span>
+    <div style="display:flex; justify-content:space-between; color:#bbb; font-size:13px; margin-top:10px; flex-wrap:wrap; gap:8px;">
+        <span style="display:inline-block; min-width:85px; text-align:right;"><i class="fas fa-percent" style="width:18px;text-align:center;"></i> <span id="percent">0</span>%</span>
+        <span style="display:inline-block; min-width:100px; text-align:right;"><i class="fas fa-tachometer-alt" style="width:18px;text-align:center;"></i> <span id="speed">0</span> KB/s</span>
+        <span style="display:inline-block; min-width:110px; text-align:right;"><i class="fas fa-database" style="width:18px;text-align:center;"></i> <span id="loaded">0</span> MB / <span id="total">0</span> MB</span>
+        <span style="display:inline-block; min-width:80px; text-align:right;"><i class="fas fa-clock" style="width:18px;text-align:center;"></i> <span id="time">0</span>s</span>
     </div>
 </div>
 
@@ -108,6 +108,7 @@
             progressContainer.style.display = 'none';
             statusMsg.style.display = 'none';
         }, 5000);
+        window.onbeforeunload = null;  // remove the refresh warning
     }
 
     // File picker UI
@@ -132,12 +133,18 @@
     });
     dropArea.addEventListener('click', () => fileInput.click());
 
-    // Upload
+    // ----- UPLOAD -----
     uploadBtn.addEventListener('click', function() {
         if (fileInput.files.length === 0) {
             alert('Select at least one file.');
             return;
         }
+
+        // Warn before page refresh during upload
+        window.onbeforeunload = function() {
+            return 'Upload in progress. Are you sure you want to leave?';
+        };
+
         resetProgress();
 
         const files = fileInput.files;
@@ -153,14 +160,27 @@
         // Update UI every 200ms
         speedInterval = setInterval(() => {
             const elapsed = (Date.now() - uploadStartTime) / 1000;
-            if (elapsed < 0.1) return;
+            if (elapsed < 0.5) return;
 
+            // Instant speed over the last 200ms
             const bytesSinceLast = uploadedBytes - lastBytes;
             const intervalSec = 0.2;
-            const instantSpeed = bytesSinceLast / intervalSec;
+            let instantSpeed = bytesSinceLast / intervalSec;
+            if (instantSpeed < 0) instantSpeed = 0;
+
+            // Keep history (10 samples)
             speedSamples.push(instantSpeed);
-            if (speedSamples.length > 5) speedSamples.shift();
-            const avgSpeed = speedSamples.reduce((a,b) => a+b, 0) / speedSamples.length;
+            if (speedSamples.length > 10) speedSamples.shift();
+
+            // Average of positive speeds
+            const valid = speedSamples.filter(s => s > 0);
+            let avgSpeed = 0;
+            if (valid.length > 0) {
+                avgSpeed = valid.reduce((a,b) => a+b, 0) / valid.length;
+            } else {
+                avgSpeed = instantSpeed;
+            }
+
             speedSpan.textContent = formatSpeed(avgSpeed);
 
             const loadedMB = (uploadedBytes / (1024 * 1024)).toFixed(1);
@@ -202,8 +222,17 @@
             fileInput.value = '';
             fileName.textContent = 'No file chosen';
         };
-        xhr.onerror = function() { clearInterval(speedInterval); finishProgress(false, 'Network error.'); };
-        xhr.ontimeout = function() { clearInterval(speedInterval); finishProgress(false, 'Upload timed out.'); };
+
+        xhr.onerror = function() {
+            clearInterval(speedInterval);
+            finishProgress(false, 'Network error. Check your connection.');
+        };
+
+        xhr.ontimeout = function() {
+            clearInterval(speedInterval);
+            finishProgress(false, 'Upload timed out.');
+        };
+
         xhr.send(formData);
     });
 </script>
