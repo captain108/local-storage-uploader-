@@ -25,19 +25,19 @@
 
 <!-- Progress -->
 <div id="progress-container" style="display:none; margin-top:20px;">
-    <div style="width:100%; height:12px; background:#2a2d44; border-radius:20px; overflow:hidden;">
-        <div id="progress-fill" style="height:100%; width:0%; background:linear-gradient(90deg,#f0c040,#f5d76e); border-radius:20px; transition:width 0.15s;"></div>
+    <div style="width:100%; height:18px; background:#2a2d44; border-radius:20px; overflow:hidden; box-shadow:inset 0 2px 4px rgba(0,0,0,0.3);">
+        <div id="progress-fill" style="height:100%; width:0%; background:#f0c040; border-radius:20px; transition:width 0.1s linear;"></div>
     </div>
-    <div style="display:flex; justify-content:space-between; color:#bbb; font-size:14px; margin-top:8px;">
+    <div style="display:flex; justify-content:space-between; color:#bbb; font-size:13px; margin-top:8px; flex-wrap:wrap; gap:5px;">
         <span><i class="fas fa-percent"></i> <span id="percent">0</span>%</span>
         <span><i class="fas fa-tachometer-alt"></i> <span id="speed">0</span> KB/s</span>
+        <span><i class="fas fa-database"></i> <span id="loaded">0</span> MB / <span id="total">0</span> MB</span>
         <span><i class="fas fa-clock"></i> <span id="time">0</span>s</span>
     </div>
 </div>
 
 <div id="status-msg" style="display:none; margin-top:12px; text-align:center; font-size:14px;"></div>
 
-<!-- File list (optional) -->
 <h3 style="color:#fff; margin-top:30px;">Your Files</h3>
 <ul style="list-style:none; padding:0;">
     {% for file in files %}
@@ -52,11 +52,11 @@
 
 <div class="text-center mt-20">
     <a href="{{ url_for('settings') }}" style="color:#f0c040;">⚙️ Telegram Settings</a> &nbsp;|&nbsp;
-    <a href="{{ url_for('auth.logout') }}" style="color:#e74c3c;">Logout</a>
+    <a href="{{ url_for('logout') }}" style="color:#e74c3c;">Logout</a>
 </div>
 
 <script>
-    // Same progress logic as before (adapted)
+    // DOM refs
     const fileInput = document.getElementById('file-input');
     const fileName = document.getElementById('file-name');
     const uploadBtn = document.getElementById('upload-btn');
@@ -65,10 +65,15 @@
     const percentSpan = document.getElementById('percent');
     const speedSpan = document.getElementById('speed');
     const timeSpan = document.getElementById('time');
+    const loadedSpan = document.getElementById('loaded');
+    const totalSpan = document.getElementById('total');
     const statusMsg = document.getElementById('status-msg');
     const dropArea = document.getElementById('drop-area');
 
     let speedInterval = null;
+    let uploadStartTime = 0;
+    let lastBytes = 0;
+    let speedSamples = [];
 
     function formatSpeed(bytesPerSec) {
         if (bytesPerSec > 1024*1024) return (bytesPerSec/(1024*1024)).toFixed(1)+' MB/s';
@@ -83,7 +88,11 @@
         percentSpan.textContent = '0';
         speedSpan.textContent = '0 KB/s';
         timeSpan.textContent = '0s';
+        loadedSpan.textContent = '0';
+        totalSpan.textContent = '0';
         uploadBtn.disabled = true;
+        speedSamples = [];
+        lastBytes = 0;
         if (speedInterval) clearInterval(speedInterval);
     }
 
@@ -101,6 +110,7 @@
         }, 5000);
     }
 
+    // File picker UI
     fileInput.addEventListener('change', function() {
         if (this.files.length > 0) {
             const names = Array.from(this.files).map(f=>f.name).join(', ');
@@ -122,6 +132,7 @@
     });
     dropArea.addEventListener('click', () => fileInput.click());
 
+    // Upload
     uploadBtn.addEventListener('click', function() {
         if (fileInput.files.length === 0) {
             alert('Select at least one file.');
@@ -132,30 +143,36 @@
         const files = fileInput.files;
         const totalSize = Array.from(files).reduce((acc,f) => acc+f.size, 0);
         let uploadedBytes = 0;
-        const startTime = Date.now();
-        let lastBytes = 0;
-        let fakePercent = 0;
+        uploadStartTime = Date.now();
+        lastBytes = 0;
+        speedSamples = [];
 
+        const totalMB = (totalSize / (1024 * 1024)).toFixed(1);
+        totalSpan.textContent = totalMB;
+
+        // Update UI every 200ms
         speedInterval = setInterval(() => {
-            const elapsed = (Date.now() - startTime) / 1000;
-            if (elapsed > 0) {
-                const speed = uploadedBytes / elapsed;
-                speedSpan.textContent = formatSpeed(speed);
-            }
-            let percent = totalSize>0 ? (uploadedBytes/totalSize)*100 : 0;
-            if (elapsed>2 && uploadedBytes===lastBytes) {
-                fakePercent += 0.5;
-                if (fakePercent>95) fakePercent=95;
-                percent = Math.max(percent, fakePercent);
-            } else {
-                fakePercent = percent;
-            }
+            const elapsed = (Date.now() - uploadStartTime) / 1000;
+            if (elapsed < 0.1) return;
+
+            const bytesSinceLast = uploadedBytes - lastBytes;
+            const intervalSec = 0.2;
+            const instantSpeed = bytesSinceLast / intervalSec;
+            speedSamples.push(instantSpeed);
+            if (speedSamples.length > 5) speedSamples.shift();
+            const avgSpeed = speedSamples.reduce((a,b) => a+b, 0) / speedSamples.length;
+            speedSpan.textContent = formatSpeed(avgSpeed);
+
+            const loadedMB = (uploadedBytes / (1024 * 1024)).toFixed(1);
+            loadedSpan.textContent = loadedMB;
+
+            let percent = totalSize > 0 ? (uploadedBytes / totalSize) * 100 : 0;
             percent = Math.min(100, percent);
             percentSpan.textContent = Math.round(percent);
-            progressFill.style.width = Math.round(percent)+'%';
-            timeSpan.textContent = Math.round(elapsed)+'s';
+            progressFill.style.width = Math.round(percent) + '%';
+            timeSpan.textContent = Math.round(elapsed) + 's';
             lastBytes = uploadedBytes;
-        }, 300);
+        }, 200);
 
         const formData = new FormData();
         for (let i=0; i<files.length; i++) {
@@ -164,17 +181,18 @@
 
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/upload', true);
-        xhr.timeout = 1800000; // 30 min
+        xhr.timeout = 3600000; // 1 hour
 
         xhr.upload.addEventListener('progress', function(e) {
-            if (e.lengthComputable) uploadedBytes = e.loaded;
+            if (e.lengthComputable) {
+                uploadedBytes = e.loaded;
+            }
         });
 
         xhr.onload = function() {
             clearInterval(speedInterval);
             if (xhr.status === 200) {
                 finishProgress(true, 'Upload successful!');
-                // Reload to show new file
                 setTimeout(() => location.reload(), 1000);
             } else {
                 let msg = 'Upload failed (HTTP '+xhr.status+')';
