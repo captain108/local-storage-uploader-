@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Captain Uploader{% endblock %}
+{% block content %}
+<h2 style="color:#fff; margin-bottom:20px;">Welcome, {{ current_user.username }}!</h2>
+
+<div style="background:rgba(255,255,255,0.05); border-radius:20px; padding:20px; margin-bottom:25px;">
+    <p style="color:#bbb;">Storage used: <span style="color:#f0c040;">{{ (used / (1024**3))|round(2) }} GB</span> 
+        of {{ (limit / (1024**3))|round(0) }} GB</p>
+    <div style="width:100%; height:8px; background:#2a2d44; border-radius:10px; overflow:hidden;">
+        <div style="height:100%; width:{{ percent }}%; background:linear-gradient(90deg,#f0c040,#f5d76e); border-radius:10px;"></div>
+    </div>
+</div>
+
+<!-- Upload Area -->
+<div style="border:2px dashed rgba(255,255,255,0.2); border-radius:20px; padding:25px; text-align:center; cursor:pointer; background:rgba(255,255,255,0.03);" id="drop-area">
+    <i class="fas fa-cloud-upload-alt" style="font-size:48px; color:#f0c040; margin-bottom:10px;"></i>
+    <p style="color:#ccc;">Click or drag & drop files here</p>
+    <input type="file" id="file-input" multiple style="display:none;">
+    <div id="file-name" style="color:#f0c040; font-weight:600; margin-top:8px;">No file chosen</div>
+</div>
+
+<div style="margin-top:20px;">
+    <button id="upload-btn" class="btn" style="width:100%;"><i class="fas fa-upload"></i> Upload Now</button>
+</div>
+
+<!-- Progress -->
+<div id="progress-container" style="display:none; margin-top:20px;">
+    <div style="width:100%; height:12px; background:#2a2d44; border-radius:20px; overflow:hidden;">
+        <div id="progress-fill" style="height:100%; width:0%; background:linear-gradient(90deg,#f0c040,#f5d76e); border-radius:20px; transition:width 0.15s;"></div>
+    </div>
+    <div style="display:flex; justify-content:space-between; color:#bbb; font-size:14px; margin-top:8px;">
+        <span><i class="fas fa-percent"></i> <span id="percent">0</span>%</span>
+        <span><i class="fas fa-tachometer-alt"></i> <span id="speed">0</span> KB/s</span>
+        <span><i class="fas fa-clock"></i> <span id="time">0</span>s</span>
+    </div>
+</div>
+
+<div id="status-msg" style="display:none; margin-top:12px; text-align:center; font-size:14px;"></div>
+
+<!-- File list (optional) -->
+<h3 style="color:#fff; margin-top:30px;">Your Files</h3>
+<ul style="list-style:none; padding:0;">
+    {% for file in files %}
+    <li style="background:rgba(255,255,255,0.05); border-radius:15px; padding:12px 15px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+        <span style="color:#ccc;">{{ file }}</span>
+        <form method="POST" action="{{ url_for('delete_file', filename=file) }}" style="display:inline;">
+            <button type="submit" style="background:none; border:none; color:#e74c3c; cursor:pointer;"><i class="fas fa-trash"></i></button>
+        </form>
+    </li>
+    {% endfor %}
+</ul>
+
+<div class="text-center mt-20">
+    <a href="{{ url_for('settings') }}" style="color:#f0c040;">⚙️ Telegram Settings</a> &nbsp;|&nbsp;
+    <a href="{{ url_for('auth.logout') }}" style="color:#e74c3c;">Logout</a>
+</div>
+
+<script>
+    // Same progress logic as before (adapted)
+    const fileInput = document.getElementById('file-input');
+    const fileName = document.getElementById('file-name');
+    const uploadBtn = document.getElementById('upload-btn');
+    const progressContainer = document.getElementById('progress-container');
+    const progressFill = document.getElementById('progress-fill');
+    const percentSpan = document.getElementById('percent');
+    const speedSpan = document.getElementById('speed');
+    const timeSpan = document.getElementById('time');
+    const statusMsg = document.getElementById('status-msg');
+    const dropArea = document.getElementById('drop-area');
+
+    let speedInterval = null;
+
+    function formatSpeed(bytesPerSec) {
+        if (bytesPerSec > 1024*1024) return (bytesPerSec/(1024*1024)).toFixed(1)+' MB/s';
+        if (bytesPerSec > 1024) return (bytesPerSec/1024).toFixed(1)+' KB/s';
+        return bytesPerSec.toFixed(0)+' B/s';
+    }
+
+    function resetProgress() {
+        statusMsg.style.display = 'none';
+        progressContainer.style.display = 'block';
+        progressFill.style.width = '0%';
+        percentSpan.textContent = '0';
+        speedSpan.textContent = '0 KB/s';
+        timeSpan.textContent = '0s';
+        uploadBtn.disabled = true;
+        if (speedInterval) clearInterval(speedInterval);
+    }
+
+    function finishProgress(success, message) {
+        clearInterval(speedInterval);
+        progressFill.style.width = '100%';
+        percentSpan.textContent = '100';
+        uploadBtn.disabled = false;
+        statusMsg.style.display = 'block';
+        statusMsg.style.color = success ? '#6fcf97' : '#e74c3c';
+        statusMsg.innerHTML = (success ? '✅ ' : '❌ ') + message;
+        setTimeout(() => {
+            progressContainer.style.display = 'none';
+            statusMsg.style.display = 'none';
+        }, 5000);
+    }
+
+    fileInput.addEventListener('change', function() {
+        if (this.files.length > 0) {
+            const names = Array.from(this.files).map(f=>f.name).join(', ');
+            fileName.textContent = names.length>50 ? names.substring(0,50)+'…' : names;
+        } else {
+            fileName.textContent = 'No file chosen';
+        }
+    });
+
+    dropArea.addEventListener('dragover', (e) => { e.preventDefault(); dropArea.style.borderColor='#f0c040'; });
+    dropArea.addEventListener('dragleave', () => { dropArea.style.borderColor='rgba(255,255,255,0.2)'; });
+    dropArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropArea.style.borderColor='rgba(255,255,255,0.2)';
+        if (e.dataTransfer.files.length) {
+            fileInput.files = e.dataTransfer.files;
+            fileName.textContent = Array.from(e.dataTransfer.files).map(f=>f.name).join(', ');
+        }
+    });
+    dropArea.addEventListener('click', () => fileInput.click());
+
+    uploadBtn.addEventListener('click', function() {
+        if (fileInput.files.length === 0) {
+            alert('Select at least one file.');
+            return;
+        }
+        resetProgress();
+
+        const files = fileInput.files;
+        const totalSize = Array.from(files).reduce((acc,f) => acc+f.size, 0);
+        let uploadedBytes = 0;
+        const startTime = Date.now();
+        let lastBytes = 0;
+        let fakePercent = 0;
+
+        speedInterval = setInterval(() => {
+            const elapsed = (Date.now() - startTime) / 1000;
+            if (elapsed > 0) {
+                const speed = uploadedBytes / elapsed;
+                speedSpan.textContent = formatSpeed(speed);
+            }
+            let percent = totalSize>0 ? (uploadedBytes/totalSize)*100 : 0;
+            if (elapsed>2 && uploadedBytes===lastBytes) {
+                fakePercent += 0.5;
+                if (fakePercent>95) fakePercent=95;
+                percent = Math.max(percent, fakePercent);
+            } else {
+                fakePercent = percent;
+            }
+            percent = Math.min(100, percent);
+            percentSpan.textContent = Math.round(percent);
+            progressFill.style.width = Math.round(percent)+'%';
+            timeSpan.textContent = Math.round(elapsed)+'s';
+            lastBytes = uploadedBytes;
+        }, 300);
+
+        const formData = new FormData();
+        for (let i=0; i<files.length; i++) {
+            formData.append('file', files[i]);
+        }
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/upload', true);
+        xhr.timeout = 1800000; // 30 min
+
+        xhr.upload.addEventListener('progress', function(e) {
+            if (e.lengthComputable) uploadedBytes = e.loaded;
+        });
+
+        xhr.onload = function() {
+            clearInterval(speedInterval);
+            if (xhr.status === 200) {
+                finishProgress(true, 'Upload successful!');
+                // Reload to show new file
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                let msg = 'Upload failed (HTTP '+xhr.status+')';
+                try { const json=JSON.parse(xhr.responseText); if(json.error) msg=json.error; } catch(e) {}
+                finishProgress(false, msg);
+            }
+            fileInput.value = '';
+            fileName.textContent = 'No file chosen';
+        };
+        xhr.onerror = function() { clearInterval(speedInterval); finishProgress(false, 'Network error.'); };
+        xhr.ontimeout = function() { clearInterval(speedInterval); finishProgress(false, 'Upload timed out.'); };
+        xhr.send(formData);
+    });
+</script>
+{% endblock %}
