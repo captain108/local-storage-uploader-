@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Settings - Captain Uploader{% endblock %}
+{% block content %}
+<h2 style="color:#fff; margin-bottom:20px;">🔧 Telegram Settings</h2>
+<form method="POST">
+    <div class="form-group">
+        <label>Bot Token</label>
+        <input type="text" name="bot_token" value="{{ user.bot_token or '' }}" placeholder="123456:ABC-DEF...">
+    </div>
+    <div class="form-group">
+        <label>Chat ID</label>
+        <input type="text" name="chat_id" value="{{ user.chat_id or '' }}" placeholder="123456789">
+    </div>
+    <button type="submit" class="btn" style="width:100%;">Save Settings</button>
+</form>
+<div class="text-center mt-20">
+    <a href="{{ url_for('dashboard') }}" style="color:#f0c040;">← Back to Dashboard</a>
+</div>
+{% endblock %}
