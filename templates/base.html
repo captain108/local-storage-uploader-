@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}Captain Uploader{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI', Tahoma, sans-serif; }
+        body {
+            min-height:100vh;
+            background: linear-gradient(145deg, #0b0c1a, #1a1d2e);
+            display:flex;
+            justify-content:center;
+            align-items:center;
+            padding:20px;
+        }
+        .glass {
+            background: rgba(255,255,255,0.08);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 40px;
+            border: 1px solid rgba(255,255,255,0.15);
+            box-shadow: 0 25px 50px rgba(0,0,0,0.7);
+            padding: 40px 35px;
+            width: 100%;
+            max-width: 700px;
+        }
+        .banner {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .banner i {
+            font-size: 60px;
+            color: #f0c040;
+            background: rgba(240,192,64,0.15);
+            padding: 15px;
+            border-radius: 50%;
+            margin-bottom: 10px;
+        }
+        .banner h1 {
+            color: #fff;
+            font-size: 28px;
+            letter-spacing: 2px;
+            font-weight: 700;
+        }
+        .banner h1 span { color: #f0c040; }
+        .banner p { color: #aaa; font-size: 14px; margin-top: 5px; }
+        .btn {
+            display: inline-block;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 50px;
+            font-weight: 700;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            color: #1a1d2e;
+            background: #f0c040;
+            text-align: center;
+        }
+        .btn:hover { transform: scale(1.03); background: #e0b030; }
+        .btn-google {
+            background: #fff;
+            color: #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .btn-google:hover { background: #f1f1f1; }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            color: #ddd;
+            margin-bottom: 6px;
+            font-size: 14px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 14px 20px;
+            border-radius: 30px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+            font-size: 16px;
+            outline: none;
+            transition: 0.3s;
+        }
+        .form-group input:focus {
+            border-color: #f0c040;
+            background: rgba(255,255,255,0.08);
+        }
+        .flash {
+            background: rgba(255,0,0,0.2);
+            color: #ff6b6b;
+            padding: 12px 20px;
+            border-radius: 30px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .text-center { text-align: center; }
+        .mt-20 { margin-top: 20px; }
+        .mb-20 { margin-bottom: 20px; }
+        .flex { display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; }
+    </style>
+</head>
+<body>
+    <div class="glass">
+        <div class="banner">
+            <i class="fas fa-crown"></i>
+            <h1>Captain <span>Uploader</span></h1>
+            <p><i class="fas fa-code"></i> Developer Edition · Multi‑coosable</p>
+        </div>
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <div class="flash">{{ messages[0] }}</div>
+          {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+        <div class="text-center mt-20" style="color:#555;font-size:12px;">
+            Made with <i class="fas fa-heart" style="color:#f0c040;"></i> by Captain · v3.0
+        </div>
+    </div>
+</body>
+</html>
