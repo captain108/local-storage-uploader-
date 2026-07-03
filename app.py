@@ -230,7 +230,8 @@ def delete_file(filename):
         return jsonify({'success': True})
     return jsonify({'error': 'File not found'}), 404
 
+with app.app_context():
+    db.create_all()
+
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
     app.run(host='0.0.0.0', port=5000, debug=False)
