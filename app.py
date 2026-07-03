@@ -15,7 +15,7 @@ app.config.from_object(Config)
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
-login_manager.login_view = 'auth.login'
+login_manager.login_view = 'login'
 
 oauth = OAuth(app)
 oauth.register(
@@ -150,7 +150,6 @@ def dashboard():
     used = get_total_storage_used(current_user.username)
     limit = Config.MAX_TOTAL_STORAGE_PER_USER
     percent = min(100, (used / limit) * 100) if limit else 0
-    # List files in user folder
     folder = get_user_folder(current_user.username)
     files = [f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
     return render_template('dashboard.html', used=used, limit=limit, percent=percent, files=files)
@@ -175,7 +174,6 @@ def upload_file():
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
 
-    # Check storage quota
     used = get_total_storage_used(current_user.username)
     remaining = Config.MAX_TOTAL_STORAGE_PER_USER - used
     if remaining <= 0:
@@ -191,27 +189,23 @@ def upload_file():
     user_folder = get_user_folder(current_user.username)
     save_path = os.path.join(user_folder, filename)
 
-    # STREAM WRITE – chunk by chunk to avoid memory issues
+    # Chunked write to avoid memory issues
     with open(save_path, 'wb') as out_file:
-        chunk_size = 8192  # 8 KB
+        chunk_size = 8192
         while True:
             chunk = file.stream.read(chunk_size)
             if not chunk:
                 break
             out_file.write(chunk)
 
-    # Update storage used
     current_user.storage_used = get_total_storage_used(current_user.username)
     db.session.commit()
 
-    # Telegram forwarding (if configured)
     tg_success = False
     if current_user.bot_token and current_user.chat_id:
         tg_success = send_to_telegram(save_path, current_user.bot_token, current_user.chat_id)
 
-    # Optional garbage collection
     gc.collect()
-
     return jsonify({
         'message': 'Upload successful',
         'filename': filename,
@@ -230,6 +224,7 @@ def delete_file(filename):
         return jsonify({'success': True})
     return jsonify({'error': 'File not found'}), 404
 
+# ---------- DATABASE TABLES CREATION (FIX) ----------
 with app.app_context():
     db.create_all()
 
