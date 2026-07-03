@@ -1,101 +1,145 @@
 import os
-import time
-import requests
-from flask import Flask, request, render_template, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+from flask_login import LoginManager, login_required, current_user
 from werkzeug.utils import secure_filename
+from models import db, User
+from auth import auth_bp, oauth
+from config import Config
+import shutil
+import requests
 
-# ---------- CONFIG ----------
-UPLOAD_FOLDER = os.path.expanduser("~/uploads")
-ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'mp4', 'zip', 'apk', 'mp3'}
-MAX_CONTENT_LENGTH = 200 * 1024 * 1024  # 200 MB total limit
-
-# 🔹 TELEGRAM SETTINGS (set to None/empty to disable)
-BOT_TOKEN = "YOUR_BOT_TOKEN"   # ← replace with your token
-CHAT_ID = "YOUR_CHAT_ID"       # ← replace with your chat ID
-
-# -----------------------------
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
+app.config.from_object(Config)
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# Database
+db.init_app(app)
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+# Login manager
+login_manager = LoginManager()
+login_manager.login_view = 'auth.login'
+login_manager.init_app(app)
 
-def send_to_telegram(file_path):
-    """Forward a file to Telegram (returns True if success)"""
-    if not BOT_TOKEN or not CHAT_ID:
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+# Register auth blueprint
+app.register_blueprint(auth_bp)
+
+# OAuth init
+oauth.init_app(app)
+
+# Create tables and user folders
+with app.app_context():
+    db.create_all()
+    # Ensure uploads folder exists
+    os.makedirs('uploads', exist_ok=True)
+
+# ---------- HELPERS ----------
+def get_user_folder(username):
+    path = os.path.join('uploads', username)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+def get_total_storage_used(username):
+    folder = get_user_folder(username)
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(folder):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            total += os.path.getsize(fp)
+    return total
+
+def send_to_telegram(file_path, bot_token, chat_id):
+    if not bot_token or not chat_id:
         return False
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
-    with open(file_path, 'rb') as f:
-        files = {'document': f}
-        data = {'chat_id': CHAT_ID}
-        try:
-            r = requests.post(url, files=files, data=data, timeout=15)
+    url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+    try:
+        with open(file_path, 'rb') as f:
+            r = requests.post(url, files={'document': f}, data={'chat_id': chat_id}, timeout=60)
             return r.status_code == 200
-        except Exception as e:
-            print(f"Telegram error: {e}")
-            return False
+    except:
+        return False
 
-@app.route('/', methods=['GET'])
+# ---------- ROUTES ----------
+@app.route('/')
 def index():
-    return render_template('index.html')
+    return redirect(url_for('auth.login'))
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    used = get_total_storage_used(current_user.username)
+    limit = Config.MAX_TOTAL_STORAGE_PER_USER
+    percent = min(100, (used / limit) * 100) if limit else 0
+    return render_template('dashboard.html', used=used, limit=limit, percent=percent)
+
+@app.route('/settings', methods=['GET', 'POST'])
+@login_required
+def settings():
+    if request.method == 'POST':
+        current_user.bot_token = request.form.get('bot_token', '').strip()
+        current_user.chat_id = request.form.get('chat_id', '').strip()
+        db.session.commit()
+        flash('Telegram settings updated!')
+        return redirect(url_for('settings'))
+    return render_template('settings.html', user=current_user)
 
 @app.route('/upload', methods=['POST'])
-def upload_files():
-    # 1. Get all uploaded files
-    uploaded_files = request.files.getlist('file')
-    if not uploaded_files or uploaded_files[0].filename == '':
+@login_required
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file'}), 400
+    file = request.files['file']
+    if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
 
-    # 2. Read multi-options from the form
-    opt_telegram = request.form.get('opt-telegram') == 'on'
-    opt_save = request.form.get('opt-save') == 'on'
-    opt_notify = request.form.get('opt-notify') == 'on'  # placeholder for future use
+    # Check storage limit
+    used = get_total_storage_used(current_user.username)
+    remaining = Config.MAX_TOTAL_STORAGE_PER_USER - used
+    if remaining <= 0:
+        return jsonify({'error': 'Storage quota exceeded'}), 413
 
-    saved_paths = []
-    tg_success = []
+    # Check file size against remaining
+    file.seek(0, os.SEEK_END)
+    size = file.tell()
+    file.seek(0)
+    if size > remaining:
+        return jsonify({'error': f'File exceeds remaining storage ({remaining//(1024**2)} MB)'}), 413
 
-    for file in uploaded_files:
-        if file.filename == '':
-            continue
-        if not allowed_file(file.filename):
-            return jsonify({'error': f'File type not allowed: {file.filename}'}), 400
+    filename = secure_filename(file.filename)
+    user_folder = get_user_folder(current_user.username)
+    save_path = os.path.join(user_folder, filename)
 
-        filename = secure_filename(file.filename)
-        save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    # Stream write
+    file.save(save_path)
 
-        # 3. Save locally (if checkbox is ON)
-        if opt_save:
-            file.save(save_path)
-            saved_paths.append(save_path)
-        else:
-            # If not saving, we need to store temporarily to send via Telegram
-            # Let's save anyway, but delete later if not needed
-            file.save(save_path)
-            saved_paths.append(save_path)  # we'll clean up if needed
+    # Update storage used in DB (optional)
+    current_user.storage_used = get_total_storage_used(current_user.username)
+    db.session.commit()
 
-        # 4. Send to Telegram (if checkbox is ON)
-        if opt_telegram and BOT_TOKEN and CHAT_ID:
-            if send_to_telegram(save_path):
-                tg_success.append(filename)
+    # Telegram forwarding if configured
+    tg_success = False
+    if current_user.bot_token and current_user.chat_id:
+        tg_success = send_to_telegram(save_path, current_user.bot_token, current_user.chat_id)
 
-        # 5. Clean up if local save was OFF (we only saved it for Telegram)
-        if not opt_save:
-            try:
-                os.remove(save_path)
-            except:
-                pass
-
-    # Return summary
     return jsonify({
-        'message': 'Upload processed',
-        'saved': saved_paths if opt_save else [],
-        'sent_to_telegram': tg_success,
-        'notify': opt_notify
+        'message': 'Upload successful',
+        'filename': filename,
+        'telegram': tg_success
     }), 200
 
+@app.route('/delete/<filename>', methods=['POST'])
+@login_required
+def delete_file(filename):
+    user_folder = get_user_folder(current_user.username)
+    path = os.path.join(user_folder, secure_filename(filename))
+    if os.path.exists(path):
+        os.remove(path)
+        current_user.storage_used = get_total_storage_used(current_user.username)
+        db.session.commit()
+        return jsonify({'success': True})
+    return jsonify({'error': 'File not found'}), 404
+
 if __name__ == '__main__':
-    # Run on all interfaces so other devices can connect
     app.run(host='0.0.0.0', port=5000, debug=False)
